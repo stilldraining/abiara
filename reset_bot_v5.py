@@ -16,25 +16,24 @@ tree = bot.tree
 VALID_AMMO = {"M995", "BS", "AP", "SS198"}
 
 
-def parse_time_string(time_str):
-    try:
-        return datetime.strptime(time_str, "%H:%M").time()
-    except ValueError:
-        return None
-
-
-def compute_reset_info(reset_time):
+def construct_reset_time(minutes: int, current_hour: bool):
+    """Construct reset datetime from minutes and current/previous hour flag."""
     now = datetime.now()
-    reset_dt = now.replace(
-        hour=reset_time.hour,
-        minute=reset_time.minute,
-        second=0,
-        microsecond=0,
-    )
+    
+    if current_hour:
+        reset_hour = now.hour
+        reset_dt = now.replace(hour=reset_hour, minute=minutes, second=0, microsecond=0)
+    else:
+        # Previous hour - handle day rollover
+        reset_dt = now - timedelta(hours=1)
+        reset_dt = reset_dt.replace(minute=minutes, second=0, microsecond=0)
+    
+    return reset_dt
 
-    if reset_dt > now:
-        reset_dt -= timedelta(days=1)
 
+def compute_reset_info(reset_dt):
+    """Calculate reset window information from reset datetime."""
+    now = datetime.now()
     elapsed = (now - reset_dt).total_seconds() / 60
 
     if elapsed < 0 or elapsed >= 80:
@@ -49,13 +48,14 @@ def compute_reset_info(reset_time):
 
 @tree.command(
     name="lastreset",
-    description="Check ammo price reset window using time and ammo type"
+    description="Check ammo price reset window using minutes and ammo type"
 )
 @app_commands.describe(
-    time="Time of the last reset in HH:MM format",
+    minutes="Minutes of the last reset (00-59)",
+    current_hour="True if reset happened in current hour, False if previous hour",
     ammo="Ammo type (M995, BS, AP, SS198)"
 )
-async def lastreset(interaction: discord.Interaction, time: str, ammo: str):
+async def lastreset(interaction: discord.Interaction, minutes: int, current_hour: bool, ammo: str):
 
     ammo = ammo.upper().strip()
     if ammo not in VALID_AMMO:
@@ -65,15 +65,17 @@ async def lastreset(interaction: discord.Interaction, time: str, ammo: str):
         )
         return
 
-    t = parse_time_string(time)
-    if not t:
+    # Validate minutes
+    if minutes < 0 or minutes > 59:
         await interaction.response.send_message(
-            "Invalid time. Use HH:MM format.",
+            "Invalid minutes. Use 00-59.",
             ephemeral=True
         )
         return
 
-    elapsed, cycle_start, safe_end, reset_end = compute_reset_info(t)
+    # Construct reset time from minutes and current/previous hour
+    reset_dt = construct_reset_time(minutes, current_hour)
+    elapsed, cycle_start, safe_end, reset_end = compute_reset_info(reset_dt)
 
     if elapsed is None:
         await interaction.response.send_message(
