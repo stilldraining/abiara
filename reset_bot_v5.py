@@ -3,6 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from datetime import datetime, timedelta
+import asyncio
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 
@@ -97,15 +98,22 @@ async def lastreset(interaction: discord.Interaction, time: str, ammo: str):
 
 @bot.event
 async def on_ready():
-    guilds = [g.id for g in bot.guilds]
+    print(f"Bot connected as {bot.user}")
+    print(f"Bot is in {len(bot.guilds)} guild(s)")
+    
+    # Wait a moment for Discord to fully register the connection
+    await asyncio.sleep(2)
+    
     try:
-        for gid in guilds:
-            await tree.sync(guild=discord.Object(id=gid))
-        print("Synced slash commands to all guilds.")
+        # Use global sync - works for all guilds, more reliable
+        synced = await tree.sync()
+        print(f"Synced {len(synced)} command(s) globally.")
+        for cmd in synced:
+            print(f"  - /{cmd.name}")
     except Exception as e:
         print(f"Slash sync error: {e}")
-
-    print(f"Bot connected as {bot.user}")
+        import traceback
+        traceback.print_exc()
 
 
 bot.run(TOKEN)
