@@ -91,12 +91,12 @@ async def lastreset(interaction: discord.Interaction, minutes: int, current_hour
     if elapsed < 40:
         msg = (
             f"The next price reset window for {ammo} starts at "
-            f"{safe_end.strftime('%H:%M')}."
+            f"XX:{safe_end.strftime('%M')}."
         )
     else:
         msg = (
             f"The reset window for {ammo} is active.\n"
-            f"Started at {safe_end.strftime('%H:%M')} and ends at {reset_end.strftime('%H:%M')}."
+            f"Started at XX:{safe_end.strftime('%M')} and ends at XX:{reset_end.strftime('%M')}."
         )
 
     # Store this reset data for the server
@@ -119,9 +119,8 @@ async def lastreset(interaction: discord.Interaction, minutes: int, current_hour
 
 
 @bot.command(name="reset")
-@commands.has_permissions(administrator=True, manage_messages=True)
 async def reset_command(ctx, *args):
-    """Admin command to view or set the latest reset."""
+    """Command to view or set the latest reset."""
     guild_id = ctx.guild.id
     
     # If no args provided, show latest reset
@@ -137,13 +136,13 @@ async def reset_command(ctx, *args):
             time_ago_str = f"{int(time_ago)} min ago" if time_ago < 60 else f"{int(time_ago/60)} hour(s) ago"
             
             if data["elapsed"] < 40:
-                status = f"Next window starts at {data['safe_end'].strftime('%H:%M')}"
+                status = f"Next window starts at XX:{data['safe_end'].strftime('%M')}"
             else:
-                status = f"Window active until {data['reset_end'].strftime('%H:%M')}"
+                status = f"Window active until XX:{data['reset_end'].strftime('%M')}"
             
             messages.append(
                 f"**{tracked_ammo}**: {status}\n"
-                f"Reset at {data['reset_dt'].strftime('%H:%M')} (submitted by {data['username']} {time_ago_str})"
+                f"Reset at XX:{data['reset_dt'].strftime('%M')} (submitted by {data['username']} {time_ago_str})"
             )
         
         await ctx.send("\n\n".join(messages))
@@ -209,19 +208,13 @@ async def reset_command(ctx, *args):
     }
     
     if elapsed < 40:
-        msg = f"Reset updated: **{ammo}** at {reset_dt.strftime('%H:%M')}\nNext window starts at {safe_end.strftime('%H:%M')} (set by {ctx.author.display_name})"
+        msg = f"Reset updated: **{ammo}** at XX:{reset_dt.strftime('%M')}\nNext window starts at XX:{safe_end.strftime('%M')} (set by {ctx.author.display_name})"
     else:
-        msg = f"Reset updated: **{ammo}** at {reset_dt.strftime('%H:%M')}\nWindow active until {reset_end.strftime('%H:%M')} (set by {ctx.author.display_name})"
+        msg = f"Reset updated: **{ammo}** at XX:{reset_dt.strftime('%M')}\nWindow active until XX:{reset_end.strftime('%M')} (set by {ctx.author.display_name})"
     
     await ctx.send(msg)
 
 
-@reset_command.error
-async def reset_command_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.send("You need Administrator or Manage Messages permission to use this command.")
-    else:
-        await ctx.send(f"Error: {error}")
 
 
 @bot.event
