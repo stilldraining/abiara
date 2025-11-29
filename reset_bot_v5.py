@@ -135,14 +135,18 @@ async def reset_command(ctx, *args):
             time_ago = (datetime.now() - data["timestamp"]).total_seconds() / 60
             time_ago_str = f"{int(time_ago)} min ago" if time_ago < 60 else f"{int(time_ago/60)} hour(s) ago"
             
+            reset_minutes = data['reset_dt'].strftime('%M')
+            
             if data["elapsed"] < 40:
-                status = f"Next window starts at XX:{data['safe_end'].strftime('%M')}"
+                minutes_until_window = int(40 - data["elapsed"])
+                status = f"→ Next window starts at XX:{data['safe_end'].strftime('%M')} (in ~{minutes_until_window} minutes)"
             else:
-                status = f"Window active until XX:{data['reset_end'].strftime('%M')}"
+                status = f"→ Window active until XX:{data['reset_end'].strftime('%M')}"
             
             messages.append(
-                f"**{tracked_ammo}**: {status}\n"
-                f"Reset at XX:{data['reset_dt'].strftime('%M')} (submitted by {data['username']} {time_ago_str})"
+                f"**{tracked_ammo}**\n\n"
+                f"Last reset: XX:{reset_minutes} (submitted by {data['username']} {time_ago_str})\n\n"
+                f"{status}"
             )
         
         await ctx.send("\n\n".join(messages))
