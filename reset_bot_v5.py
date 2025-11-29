@@ -8,12 +8,16 @@ import asyncio
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 
 intents = discord.Intents.default()
-intents.message_content = False
+intents.message_content = True  # Needed for prefix commands
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 VALID_AMMO = {"M995", "BS", "AP", "SS198"}
+
+# Store latest reset per server: {guild_id: {ammo: reset_data}}
+# reset_data: {reset_dt, ammo, user_id, username, timestamp, elapsed, safe_end, reset_end}
+latest_resets = {}
 
 
 def construct_reset_time(minutes: int, current_hour: bool):
@@ -95,7 +99,129 @@ async def lastreset(interaction: discord.Interaction, minutes: int, current_hour
             f"Started at {safe_end.strftime('%H:%M')} and ends at {reset_end.strftime('%H:%M')}."
         )
 
+    # Store this reset data for the server
+    guild_id = interaction.guild_id
+    if guild_id:
+        if guild_id not in latest_resets:
+            latest_resets[guild_id] = {}
+        latest_resets[guild_id][ammo] = {
+            "reset_dt": reset_dt,
+            "ammo": ammo,
+            "user_id": interaction.user.id,
+            "username": interaction.user.display_name,
+            "timestamp": datetime.now(),
+            "elapsed": elapsed,
+            "safe_end": safe_end,
+            "reset_end": reset_end
+        }
+
     await interaction.response.send_message(msg)
+
+
+@bot.command(name="reset")
+@commands.has_permissions(administrator=True, manage_messages=True)
+async def reset_command(ctx, *args):
+    """Admin command to view or set the latest reset."""
+    guild_id = ctx.guild.id
+    
+    # If no args provided, show latest reset
+    if not args:
+        if guild_id not in latest_resets or not latest_resets[guild_id]:
+            await ctx.send("No reset data tracked yet. Use `/lastreset` first or set one with `!reset minutes:XX current_hour:true/false ammo:XXXX`")
+            return
+        
+        # Show all tracked ammo types
+        messages = []
+        for tracked_ammo, data in latest_resets[guild_id].items():
+            time_ago = (datetime.now() - data["timestamp"]).total_seconds() / 60
+            time_ago_str = f"{int(time_ago)} min ago" if time_ago < 60 else f"{int(time_ago/60)} hour(s) ago"
+            
+            if data["elapsed"] < 40:
+                status = f"Next window starts at {data['safe_end'].strftime('%H:%M')}"
+            else:
+                status = f"Window active until {data['reset_end'].strftime('%H:%M')}"
+            
+            messages.append(
+                f"**{tracked_ammo}**: {status}\n"
+                f"Reset at {data['reset_dt'].strftime('%H:%M')} (submitted by {data['username']} {time_ago_str})"
+            )
+        
+        await ctx.send("\n\n".join(messages))
+        return
+    
+    # Parse arguments: minutes:XX current_hour:true/false ammo:XXXX
+    minutes = None
+    current_hour = None
+    ammo = None
+    
+    for arg in args:
+        if arg.startswith("minutes:"):
+            try:
+                minutes = int(arg.split(":")[1])
+            except (ValueError, IndexError):
+                await ctx.send("Invalid minutes format. Use `minutes:XX` where XX is 00-59.")
+                return
+        elif arg.startswith("current_hour:"):
+            hour_val = arg.split(":")[1].lower()
+            if hour_val == "true":
+                current_hour = True
+            elif hour_val == "false":
+                current_hour = False
+            else:
+                await ctx.send("Invalid current_hour format. Use `current_hour:true` or `current_hour:false`.")
+                return
+        elif arg.startswith("ammo:"):
+            ammo = arg.split(":")[1].upper().strip()
+    
+    # Validate all required args are present
+    if minutes is None or current_hour is None or ammo is None:
+        await ctx.send("To set a reset, use: `!reset minutes:XX current_hour:true/false ammo:XXXX`\nExample: `!reset minutes:05 current_hour:true ammo:M995`")
+        return
+    
+    if ammo not in VALID_AMMO:
+        await ctx.send(f"Invalid ammo. Use: M995, BS, AP, SS198")
+        return
+    
+    if minutes < 0 or minutes > 59:
+        await ctx.send("Invalid minutes. Use 00-59.")
+        return
+    
+    # Construct and validate reset time
+    reset_dt = construct_reset_time(minutes, current_hour)
+    elapsed, cycle_start, safe_end, reset_end = compute_reset_info(reset_dt)
+    
+    if elapsed is None:
+        await ctx.send("This reset time is too old. Provide one from the last 80 minutes.")
+        return
+    
+    # Store the reset
+    if guild_id not in latest_resets:
+        latest_resets[guild_id] = {}
+    latest_resets[guild_id][ammo] = {
+        "reset_dt": reset_dt,
+        "ammo": ammo,
+        "user_id": ctx.author.id,
+        "username": ctx.author.display_name,
+        "timestamp": datetime.now(),
+        "elapsed": elapsed,
+        "safe_end": safe_end,
+        "reset_end": reset_end
+    }
+    
+    if elapsed < 40:
+        msg = f"Reset updated: **{ammo}** at {reset_dt.strftime('%H:%M')}\nNext window starts at {safe_end.strftime('%H:%M')} (set by {ctx.author.display_name})"
+    else:
+        msg = f"Reset updated: **{ammo}** at {reset_dt.strftime('%H:%M')}\nWindow active until {reset_end.strftime('%H:%M')} (set by {ctx.author.display_name})"
+    
+    await ctx.send(msg)
+
+
+@reset_command.error
+async def reset_command_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("You need Administrator or Manage Messages permission to use this command.")
+    else:
+        await ctx.send(f"Error: {error}")
 
 
 @bot.event
