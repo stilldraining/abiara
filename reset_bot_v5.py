@@ -144,8 +144,8 @@ async def reset_command(ctx, *args):
                 status = f"→ Window active until XX:{data['reset_end'].strftime('%M')}"
             
             messages.append(
-                f"**{tracked_ammo}**\n\n"
-                f"Last reset: XX:{reset_minutes} (submitted by {data['username']} {time_ago_str})\n\n"
+                f"**{tracked_ammo}**\n"
+                f"Last reset: XX:{reset_minutes} (submitted by {data['username']} {time_ago_str})\n"
                 f"{status}"
             )
         
