@@ -14,7 +14,7 @@ intents.message_content = True  # Needed for prefix commands
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-VALID_AMMO = {"M995", "BS", "AP", "SS198"}
+VALID_AMMO = {"M995", "BS", "AP", "SS198", "DVC12"}
 
 # Store latest reset per server: {guild_id: {ammo: reset_data}}
 # reset_data: {reset_dt, ammo, user_id, username, timestamp, elapsed, safe_end, reset_end}
