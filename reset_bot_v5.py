@@ -15,6 +15,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 VALID_AMMO = {"M995", "BS", "AP", "SS198", "DVC12"}
+VALID_AMMO_STR = ", ".join(sorted(VALID_AMMO))  # For use in error messages and descriptions
 
 # Store latest reset per server: {guild_id: {ammo: reset_data}}
 # reset_data: {reset_dt, ammo, user_id, username, timestamp, elapsed, safe_end, reset_end}
@@ -83,14 +84,14 @@ def check_rate_limit(user_id):
 @app_commands.describe(
     minutes="Minutes of the last reset (00-59)",
     current_hour="True if reset happened in current hour, False if previous hour",
-    ammo="Ammo type (M995, BS, AP, SS198)"
+    ammo=f"Ammo type ({VALID_AMMO_STR})"
 )
 async def lastreset(interaction: discord.Interaction, minutes: int, current_hour: bool, ammo: str):
 
     ammo = ammo.upper().strip()
     if ammo not in VALID_AMMO:
         await interaction.response.send_message(
-            f"Invalid ammo. Use: M995, BS, AP, SS198",
+            f"Invalid ammo. Use: {VALID_AMMO_STR}",
             ephemeral=True
         )
         return
@@ -264,7 +265,7 @@ async def reset_command(ctx, *args):
         return
     
     if ammo not in VALID_AMMO:
-        await ctx.send(f"Invalid ammo. Use: M995, BS, AP, SS198")
+        await ctx.send(f"Invalid ammo. Use: {VALID_AMMO_STR}")
         return
     
     if minutes < 0 or minutes > 59:
