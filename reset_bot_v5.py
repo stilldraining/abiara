@@ -178,15 +178,15 @@ async def reset_command(ctx, *args):
             await ctx.send(f"⏱️ Rate limited! Please wait {wait_msg} before using `!reset` again.")
             return
         
-        # Update rate limit timestamp
-        reset_rate_limits[user_id] = datetime.now()
-        
         # Check global shared resets first, then fall back to local
         resets_to_show = global_resets if global_resets else (latest_resets.get(guild_id, {}))
         
         if not resets_to_show:
             await ctx.send("No reset data tracked yet. Use `/lastreset` first or set one with `!reset minutes:XX current_hour:true/false ammo:XXXX`")
             return
+        
+        # Update rate limit timestamp only after confirming there's data to show
+        reset_rate_limits[user_id] = datetime.now()
         
         # Show all tracked ammo types
         messages = []
@@ -225,6 +225,11 @@ async def reset_command(ctx, *args):
                     f"Last reset: XX:{reset_minutes} (submitted by {data['username']} {time_ago_str})\n"
                     f"{status}"
                 )
+        
+        # Check if all resets were filtered out (expired)
+        if not messages:
+            await ctx.send("No active reset data available. All tracked resets have expired (>80 minutes old). Use `/lastreset` or `!reset` to set a new reset time.")
+            return
         
         await ctx.send("\n\n".join(messages))
         return
