@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import asyncio
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+SOURCE_SERVER_ID = int(os.getenv("SOURCE_SERVER_ID", "1275483843918299236"))
 
 intents = discord.Intents.default()
 intents.message_content = True  # Needed for prefix commands
@@ -18,6 +19,12 @@ VALID_AMMO = {"M995", "BS", "AP", "SS198"}
 # Store latest reset per server: {guild_id: {ammo: reset_data}}
 # reset_data: {reset_dt, ammo, user_id, username, timestamp, elapsed, safe_end, reset_end}
 latest_resets = {}
+
+# Global shared reset data (updated by source server, visible to all): {ammo: reset_data}
+global_resets = {}
+
+# Rate limit tracking for !reset command (viewing only): {user_id: last_used_timestamp}
+reset_rate_limits = {}
 
 
 def construct_reset_time(minutes: int, current_hour: bool):
@@ -48,6 +55,25 @@ def compute_reset_info(reset_dt):
     reset_end = cycle_start + timedelta(minutes=80)
 
     return elapsed, cycle_start, safe_end, reset_end
+
+
+def check_rate_limit(user_id):
+    """Check if user can use !reset command (viewing only).
+    Returns (is_allowed, time_remaining_seconds) tuple."""
+    now = datetime.now()
+    
+    if user_id not in reset_rate_limits:
+        return True, 0
+    
+    last_used = reset_rate_limits[user_id]
+    time_since_last = (now - last_used).total_seconds()
+    cooldown_seconds = 300  # 5 minutes
+    
+    if time_since_last < cooldown_seconds:
+        time_remaining = cooldown_seconds - time_since_last
+        return False, time_remaining
+    
+    return True, 0
 
 
 @tree.command(
@@ -114,6 +140,19 @@ async def lastreset(interaction: discord.Interaction, minutes: int, current_hour
             "safe_end": safe_end,
             "reset_end": reset_end
         }
+        
+        # If this is the source server, also update global shared state
+        if guild_id == SOURCE_SERVER_ID:
+            global_resets[ammo] = {
+                "reset_dt": reset_dt,
+                "ammo": ammo,
+                "user_id": interaction.user.id,
+                "username": interaction.user.display_name,
+                "timestamp": datetime.now(),
+                "elapsed": elapsed,
+                "safe_end": safe_end,
+                "reset_end": reset_end
+            }
 
     await interaction.response.send_message(msg)
 
@@ -125,13 +164,33 @@ async def reset_command(ctx, *args):
     
     # If no args provided, show latest reset
     if not args:
-        if guild_id not in latest_resets or not latest_resets[guild_id]:
+        # Check rate limit for viewing reset status
+        user_id = ctx.author.id
+        is_allowed, time_remaining = check_rate_limit(user_id)
+        
+        if not is_allowed:
+            minutes_remaining = int(time_remaining // 60)
+            seconds_remaining = int(time_remaining % 60)
+            if minutes_remaining > 0:
+                wait_msg = f"{minutes_remaining} minute{'s' if minutes_remaining != 1 else ''} and {seconds_remaining} second{'s' if seconds_remaining != 1 else ''}"
+            else:
+                wait_msg = f"{seconds_remaining} second{'s' if seconds_remaining != 1 else ''}"
+            await ctx.send(f"⏱️ Rate limited! Please wait {wait_msg} before using `!reset` again.")
+            return
+        
+        # Update rate limit timestamp
+        reset_rate_limits[user_id] = datetime.now()
+        
+        # Check global shared resets first, then fall back to local
+        resets_to_show = global_resets if global_resets else (latest_resets.get(guild_id, {}))
+        
+        if not resets_to_show:
             await ctx.send("No reset data tracked yet. Use `/lastreset` first or set one with `!reset minutes:XX current_hour:true/false ammo:XXXX`")
             return
         
         # Show all tracked ammo types
         messages = []
-        for tracked_ammo, data in latest_resets[guild_id].items():
+        for tracked_ammo, data in resets_to_show.items():
             time_ago = (datetime.now() - data["timestamp"]).total_seconds() / 60
             time_ago_str = f"{int(time_ago)} min ago" if time_ago < 60 else f"{int(time_ago/60)} hour(s) ago"
             
@@ -153,11 +212,19 @@ async def reset_command(ctx, *args):
                 minutes_until_end = int(80 - current_elapsed)
                 status = f"→ Window active until XX:{data['reset_end'].strftime('%M')} (ends in ~{minutes_until_end} minutes)"
             
-            messages.append(
-                f"**{tracked_ammo}**\n"
-                f"Last reset: XX:{reset_minutes} (submitted by {data['username']} {time_ago_str})\n"
-                f"{status}"
-            )
+            # Don't show submitter info if showing global resets (from source server)
+            if resets_to_show is global_resets:
+                messages.append(
+                    f"**{tracked_ammo}**\n"
+                    f"Last reset: XX:{reset_minutes}\n"
+                    f"{status}"
+                )
+            else:
+                messages.append(
+                    f"**{tracked_ammo}**\n"
+                    f"Last reset: XX:{reset_minutes} (submitted by {data['username']} {time_ago_str})\n"
+                    f"{status}"
+                )
         
         await ctx.send("\n\n".join(messages))
         return
@@ -207,7 +274,7 @@ async def reset_command(ctx, *args):
         await ctx.send("This reset time is too old. Provide one from the last 80 minutes.")
         return
     
-    # Store the reset
+    # Store the reset locally
     if guild_id not in latest_resets:
         latest_resets[guild_id] = {}
     latest_resets[guild_id][ammo] = {
@@ -221,10 +288,28 @@ async def reset_command(ctx, *args):
         "reset_end": reset_end
     }
     
-    if elapsed < 40:
-        msg = f"Reset updated: **{ammo}** at XX:{reset_dt.strftime('%M')}\nNext window starts at XX:{safe_end.strftime('%M')} (set by {ctx.author.display_name})"
+    # If this is the source server, also update global shared state
+    if guild_id == SOURCE_SERVER_ID:
+        global_resets[ammo] = {
+            "reset_dt": reset_dt,
+            "ammo": ammo,
+            "user_id": ctx.author.id,
+            "username": ctx.author.display_name,
+            "timestamp": datetime.now(),
+            "elapsed": elapsed,
+            "safe_end": safe_end,
+            "reset_end": reset_end
+        }
+        if elapsed < 40:
+            msg = f"Reset updated: **{ammo}** at XX:{reset_dt.strftime('%M')}\nNext window starts at XX:{safe_end.strftime('%M')} (set by {ctx.author.display_name})"
+        else:
+            msg = f"Reset updated: **{ammo}** at XX:{reset_dt.strftime('%M')}\nWindow active until XX:{reset_end.strftime('%M')} (set by {ctx.author.display_name})"
     else:
-        msg = f"Reset updated: **{ammo}** at XX:{reset_dt.strftime('%M')}\nWindow active until XX:{reset_end.strftime('%M')} (set by {ctx.author.display_name})"
+        # Non-source server: update local only, inform user
+        if elapsed < 40:
+            msg = f"Reset updated locally: **{ammo}** at XX:{reset_dt.strftime('%M')}\nNext window starts at XX:{safe_end.strftime('%M')}\n(Note: Only the source server can update shared resets visible to all servers)"
+        else:
+            msg = f"Reset updated locally: **{ammo}** at XX:{reset_dt.strftime('%M')}\nWindow active until XX:{reset_end.strftime('%M')}\n(Note: Only the source server can update shared resets visible to all servers)"
     
     await ctx.send(msg)
 
