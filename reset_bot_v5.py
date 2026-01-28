@@ -229,7 +229,7 @@ async def reset_command(ctx, *args):
         
         # Check if all resets were filtered out (expired)
         if not messages:
-            await ctx.send("No active reset data available. All tracked resets have expired (>80 minutes old). Use `/lastreset` or `!reset` to set a new reset time.")
+            await ctx.send("No active reset data available. All tracked resets have expired (>80 minutes old). Use /lastreset to set a new reset time.")
             return
         
         await ctx.send("\n\n".join(messages))
